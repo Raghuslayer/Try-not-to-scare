@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Try Not to Scream</title>
+  <!-- Note: Tailwind CDN used for prototyping. For production, install Tailwind CLI: https://tailwindcss.com/docs/installation -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Nosifer&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background: radial-gradient(circle, #4A0000 0%, #000000 70%);
+      color: #FF4444;
+      font-family: 'Nosifer', sans-serif;
+      overflow: hidden;
+      position: relative;
+    }
+    .glitch {
+      animation: glitch 0.3s infinite;
+    }
+    @keyframes glitch {
+      0% { transform: translate(0); opacity: 1; }
+      20% { transform: translate(-2px, 2px); opacity: 0.8; }
+      40% { transform: translate(2px, -2px); opacity: 0.6; }
+      60% { transform: translate(-2px, -2px); opacity: 0.8; }
+      80% { transform: translate(2px, 2px); opacity: 1; }
+      100% { transform: translate(0); opacity: 1; }
+    }
+    .flicker {
+      animation: flicker 3s infinite;
+    }
+    @keyframes flicker {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+    .static {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAGElEQVR42mNgYGD4z4ABMBCgAQQA3gMAnb6iN8W6uZwAAAAASUVORK5CYII=') repeat;
+      opacity: 0.1;
+      pointer-events: none;
+    }
+    h1 {
+      font-family: 'Creepster', cursive;
+      text-shadow: 0 0 10px #FF0000, 0 0 20px #FF0000;
+    }
+    button {
+      transition: transform 0.2s;
+    }
+    button:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 15px #FF0000;
+    }
+  </style>
+</head>
+<body class="flicker">
+  <div class="static"></div>
+  <div class="container mx-auto p-4 text-center">
+    <h1 class="text-5xl mb-4 glitch">Try Not to Scream</h1>
+    <p class="text-lg mb-4">Survive the jumpscares without screaming! Score: <span id="score">0</span> seconds</p>
+    <p class="text-sm mb-4">Note: Disable ad blockers for youtube.com and host on a web server (not file://) to ensure videos play correctly.</p>
+    <div id="status" class="text-2xl mb-4"></div>
+    <div id="player" class="mx-auto" style="width: 360px; height: 640px;"></div>
+    <button id="startBtn" class="mt-4 bg-red-900 text-white px-6 py-2 rounded-lg font-creepster text-xl">Start Game</button>
+  </div>
+
+  <audio id="bgScream" loop>
+    <source src="https://www.myinstants.com/media/sounds/creepy-whisper.mp3" type="audio/mpeg">
+  </audio>
+
+  <script>
+    const apiKeys = [
+      'AIzaSyDBeGu9flb7pyBobMk-2fP-XDRkC2RTd4k',
+      'AIzaSyBrZ4e_rUvb6CzRif9XDLrLOajRLyeMfGM',
+      'AIzaSyD7aWN71wUhJuclZj89ef-N_jzcDuVXF94',
+      'AIzaSyCrA4_sW0XvD8mVhRUh9T5YVydJdsn7Ekk',
+      'AIzaSyAS18zcIYz2ssVT7Q840Ja6jDbO31xpZdo',
+      'AIzaSyBiDIoBVUuWNpMuJc5qTVfaWPCOTJCOFVE',
+      'AIzaSyByUDKxoKnJzzCx6HjJaQeoSuHKYwbOshk',
+      'AIzaSyCoaahxIviYiL-GPfc4fbEubAInzu1HJsI',
+      'AIzaSyBsO0Ac6ZmrSP8QDXEIOEX645RSBVzkTZY',
+      'AIzaSyC-R8j6fiNwS30viqs-Fqx3rtKjD6FmhWY',
+      'AIzaSyDvDNEDfn6SiLTVJuF8uv3ZXy0YXu9fHsc'
+    ];
+    let currentApiKeyIndex = 0;
+    let player;
+    let score = 0;
+    let startTime;
+    let isPlaying = false;
+    let videoList = [];
+    let currentVideoIndex = 0;
+    let audioContext;
+    let analyser;
+    let screamDetected = false;
+    let playerReady = false;
+
+    const statusEl = document.getElementById('status');
+    const scoreEl = document.getElementById('score');
+    const startBtn = document.getElementById('startBtn');
+    const bgScream = document.getElementById('bgScream');
+
+    // Initialize YouTube player
+    function onYouTubeIframeAPIReady() {
+      player = new YT.Player('player', {
+        height: '640',
+        width: '360',
+        playerVars: { 'autoplay': 0, 'controls': 1, 'rel': 0, 'enablejsapi': 1, 'origin': window.location.origin },
+        events: {
+          'onReady': onPlayerReady,
+          'onStateChange': onPlayerStateChange,
+          'onError': onPlayerError
+        }
+      });
+    }
+
+    function onPlayerReady(event) {
+      playerReady = true;
+      if (window.location.protocol === 'file:') {
+        statusEl.textContent = 'Error: Please host this page on a web server (e.g., python -m http.server) instead of file://';
+        startBtn.textContent = 'Retry';
+        startBtn.classList.remove('hidden');
+        isPlaying = false;
+      }
+    }
+
+    function onPlayerStateChange(event) {
+      if (event.data === YT.PlayerState.ENDED && isPlaying) {
+        loadNextVideo();
+      }
+    }
+
+    function onPlayerError(event) {
+      console.error('Player error:', event.data, 'Video ID:', videoList[currentVideoIndex]?.id.videoId || 'undefined');
+      statusEl.textContent = 'Video failed to load. Trying next...';
+      currentVideoIndex++;
+      loadNextVideo();
+    }
+
+    // Fetch YouTube Shorts with horror topics
+    async function fetchVideos() {
+      const apiKey = apiKeys[currentApiKeyIndex];
+      const query = 'jumpscares | horror | scary -live';
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet,topicDetails&q=${encodeURIComponent(query)}&type=video&videoDuration=short&videoEmbeddable=true&videoSyndicated=true&maxResults=20&key=${apiKey}`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 403) {
+            currentApiKeyIndex = (currentApiKeyIndex + 1) % apiKeys.length;
+            statusEl.textContent = 'API quota exceeded. Switching key...';
+            return fetchVideos();
+          }
+          throw new Error('Failed to fetch videos');
+        }
+        const data = await response.json();
+        const videoIds = data.items
+          .filter(item => item.id?.videoId && item.topicDetails?.topicIds?.includes('/m/0ch8v')) // Horror topic
+          .map(item => item.id.videoId)
+          .filter(id => id && typeof id === 'string' && id.length === 11);
+        videoList = await filterPlayableVideos(videoIds);
+        console.log('Fetched videos:', videoList.map(v => v.id.videoId));
+        if (videoList.length === 0) {
+          statusEl.textContent = 'No playable horror Shorts found. Try again later.';
+          startBtn.textContent = 'Retry';
+          startBtn.classList.remove('hidden');
+          isPlaying = false;
+        }
+        currentVideoIndex = 0;
+      } catch (error) {
+        console.error('Fetch error:', error);
+        statusEl.textContent = 'Error fetching videos. Retrying...';
+        currentApiKeyIndex = (currentApiKeyIndex + 1) % apiKeys.length;
+        return fetchVideos();
+      }
+    }
+
+    // Filter playable videos
+    async function filterPlayableVideos(videoIds) {
+      if (!videoIds.length) return [];
+      const apiKey = apiKeys[currentApiKeyIndex];
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=status&id=${videoIds.join(',')}&key=${apiKey}`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 403) {
+            currentApiKeyIndex = (currentApiKeyIndex + 1) % apiKeys.length;
+            return filterPlayableVideos(videoIds);
+          }
+          throw new Error('Failed to check video status');
+        }
+        const data = await response.json();
+        return data.items
+          .filter(item => item.id && item.status.embeddable && item.status.uploadStatus === 'processed')
+          .map(item => ({ id: { videoId: item.id } }));
+      } catch (error) {
+        console.error('Video filter error:', error);
+        return [];
+      }
+    }
+
+    // Load and play next video
+    function loadNextVideo() {
+      if (!isPlaying) return;
+      if (!videoList.length || currentVideoIndex >= videoList.length) {
+        currentVideoIndex = 0;
+        fetchVideos().then(() => {
+          if (videoList.length > 0) playVideo();
+        });
+        return;
+      }
+      playVideo();
+    }
+
+    function playVideo() {
+      if (!playerReady) {
+        setTimeout(playVideo, 500);
+        return;
+      }
+      const video = videoList[currentVideoIndex];
+      const videoId = video?.id?.videoId;
+      if (!videoId || typeof videoId !== 'string' || videoId.length !== 11) {
+        console.warn('Invalid video ID:', videoId);
+        currentVideoIndex++;
+        loadNextVideo();
+        return;
+      }
+      console.log('Playing video:', videoId);
+      player.loadVideoById(videoId);
+      currentVideoIndex++;
+      startTime = Date.now();
+      statusEl.textContent = 'Don’t scream...';
+    }
+
+    // Scream detection
+    async function setupAudio() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 512;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Float32Array(bufferLength);
+
+        function checkScream() {
+          if (!isPlaying || screamDetected) return;
+          analyser.getFloatTimeDomainData(dataArray);
+          let rms = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            rms += dataArray[i] * dataArray[i];
+          }
+          rms = Math.sqrt(rms / bufferLength);
+          if (rms > 0.5) {
+            screamDetected = true;
+            isPlaying = false;
+            player.stopVideo();
+            statusEl.textContent = 'YOU SCREAMED! YOU LOST!';
+            statusEl.classList.add('glitch');
+            bgScream.pause();
+            startBtn.textContent = 'Restart Game';
+            startBtn.classList.remove('hidden');
+          } else {
+            requestAnimationFrame(checkScream);
+          }
+        }
+        checkScream();
+      } catch (error) {
+        statusEl.textContent = 'Microphone access denied. Please allow microphone to play.';
+        startBtn.textContent = 'Retry';
+        startBtn.classList.remove('hidden');
+      }
+    }
+
+    // Start game
+    async function startGame() {
+      if (!isPlaying) {
+        if (window.location.protocol === 'file:') {
+          statusEl.textContent = 'Error: Please host this page on a web server (e.g., python -m http.server) instead of file://';
+          startBtn.textContent = 'Retry';
+          startBtn.classList.remove('hidden');
+          return;
+        }
+        screamDetected = false;
+        isPlaying = true;
+        score = 0;
+        currentVideoIndex = 0;
+        videoList = [];
+        scoreEl.textContent = score;
+        statusEl.textContent = 'Loading horror Shorts...';
+        statusEl.classList.remove('glitch');
+        startBtn.classList.add('hidden');
+        bgScream.volume = 0.1;
+        bgScream.play().catch(() => console.warn('Background audio blocked'));
+        await fetchVideos();
+        if (videoList.length > 0) {
+          await setupAudio();
+          loadNextVideo();
+          updateScore();
+        } else {
+          statusEl.textContent = 'No videos available. Try again later.';
+          startBtn.textContent = 'Retry';
+          startBtn.classList.remove('hidden');
+          isPlaying = false;
+        }
+      }
+    }
+
+    // Update score
+    function updateScore() {
+      if (isPlaying && !screamDetected) {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        score += elapsed;
+        scoreEl.textContent = score;
+        setTimeout(updateScore, 1000);
+      }
+    }
+
+    startBtn.addEventListener('click', startGame);
+  </script>
+</body>
+</html>
