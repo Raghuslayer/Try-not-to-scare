@@ -188,7 +188,7 @@
     async function fetchVideos() {
       const apiKey = apiKeys[currentApiKeyIndex];
       const query = 'jumpscares | horror | scary -live';
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet,topicDetails&q=${encodeURIComponent(query)}&type=video&videoDuration=short&videoEmbeddable=true&videoSyndicated=true&maxResults=20&key=${apiKey}`;
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet,topicDetails&q=${encodeURIComponent(query)}&type=video&videoDuration=short&videoEmbeddable=true&videoSyndicated=true&maxResults=5&key=${apiKey}`;
       try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -201,7 +201,7 @@
         }
         const data = await response.json();
         const videoIds = data.items
-          .filter(item => item.id?.videoId && item.topicDetails?.topicIds?.includes('/m/0ch8v')) // Horror topic
+          .filter(item => item.id?.videoId)
           .map(item => item.id.videoId)
           .filter(id => id && typeof id === 'string' && id.length === 11);
         const validVideos = await filterPlayableVideos(videoIds);
@@ -229,7 +229,8 @@
     async function filterPlayableVideos(videoIds) {
       if (!videoIds.length) return [];
       const apiKey = apiKeys[currentApiKeyIndex];
-      const url = `https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id=${videoIds.join(',')}&key=${apiKey}`;
+const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,status,topicDetails&id=${videoIds.join(',')}&key=${apiKey}`;
+
       try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -241,13 +242,13 @@
         }
         const data = await response.json();
         return data.items
-          .filter(item => 
-            item.id &&
-            item.status.embeddable && 
-            item.status.uploadStatus === 'processed' &&
-            !item.contentDetails?.regionRestriction?.blocked?.length &&
-            !item.contentDetails?.contentRating?.ytRating // Exclude age-restricted
-          )
+.filter(item =>
+  item.id &&
+  item.status.embeddable &&
+  item.status.uploadStatus === 'processed' &&
+  item.topicDetails?.topicIds?.includes('/m/0ch8v') // optional: keep only horror
+)
+
           .map(item => ({ id: { videoId: item.id } }));
       } catch (error) {
         console.error('Video filter error:', error);
