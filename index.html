@@ -4,8 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Try Not to Scream</title>
-  <!-- Note: Tailwind CDN used for prototyping. For production, install Tailwind CLI: https://tailwindcss.com/docs/installation -->
-  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
   <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Nosifer&display=swap" rel="stylesheet">
   <style>
@@ -15,7 +13,28 @@
       font-family: 'Nosifer', sans-serif;
       overflow: hidden;
       position: relative;
+      margin: 0;
     }
+    .container {
+      max-width: 1280px;
+      margin-left: auto;
+      margin-right: auto;
+      padding: 1rem;
+      text-align: center;
+    }
+    .text-5xl { font-size: 3rem; line-height: 1; }
+    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+    .mb-4 { margin-bottom: 1rem; }
+    .mt-4 { margin-top: 1rem; }
+    .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .bg-red-900 { background-color: #7F1D1D; }
+    .text-white { color: #FFFFFF; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .hidden { display: none; }
     .glitch {
       animation: glitch 0.3s infinite;
     }
@@ -50,6 +69,8 @@
       text-shadow: 0 0 10px #FF0000, 0 0 20px #FF0000;
     }
     button {
+      font-family: 'Creepster', cursive;
+      font-size: 1.25rem;
       transition: transform 0.2s;
     }
     button:hover {
@@ -60,13 +81,13 @@
 </head>
 <body class="flicker">
   <div class="static"></div>
-  <div class="container mx-auto p-4 text-center">
+  <div class="container">
     <h1 class="text-5xl mb-4 glitch">Try Not to Scream</h1>
     <p class="text-lg mb-4">Survive the jumpscares without screaming! Score: <span id="score">0</span> seconds</p>
-    <p class="text-sm mb-4">Note: Disable ad blockers for youtube.com and host on a web server (not file://) to ensure videos play correctly.</p>
+    <p class="text-sm mb-4">Note: Disable ad blockers for youtube.com and ensure HTTPS hosting to play videos correctly.</p>
     <div id="status" class="text-2xl mb-4"></div>
     <div id="player" class="mx-auto" style="width: 360px; height: 640px;"></div>
-    <button id="startBtn" class="mt-4 bg-red-900 text-white px-6 py-2 rounded-lg font-creepster text-xl">Start Game</button>
+    <button id="startBtn" class="mt-4 bg-red-900 text-white px-6 py-2 rounded-lg">Start Game</button>
   </div>
 
   <audio id="bgScream" loop>
@@ -98,18 +119,40 @@
     let analyser;
     let screamDetected = false;
     let playerReady = false;
+    let videoQueue = [];
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_BASE = 500;
 
     const statusEl = document.getElementById('status');
     const scoreEl = document.getElementById('score');
     const startBtn = document.getElementById('startBtn');
     const bgScream = document.getElementById('bgScream');
 
+    // Check network connectivity for YouTube
+    function checkNetwork() {
+      return fetch('https://www.youtube.com/favicon.ico', { method: 'HEAD', cache: 'no-store' })
+        .then(() => true)
+        .catch(() => {
+          statusEl.textContent = 'Network issue or ad blocker detected. Disable ad blockers for youtube.com and check your connection.';
+          startBtn.textContent = 'Retry';
+          startBtn.classList.remove('hidden');
+          isPlaying = false;
+          return false;
+        });
+    }
+
     // Initialize YouTube player
     function onYouTubeIframeAPIReady() {
       player = new YT.Player('player', {
         height: '640',
         width: '360',
-        playerVars: { 'autoplay': 0, 'controls': 1, 'rel': 0, 'enablejsapi': 1, 'origin': window.location.origin },
+        playerVars: { 
+          'autoplay': 0, 
+          'controls': 1, 
+          'rel': 0, 
+          'enablejsapi': 1, 
+          'origin': window.location.origin || 'https://your-live-domain.com' // Replace with your live domain
+        },
         events: {
           'onReady': onPlayerReady,
           'onStateChange': onPlayerStateChange,
@@ -120,8 +163,8 @@
 
     function onPlayerReady(event) {
       playerReady = true;
-      if (window.location.protocol === 'file:') {
-        statusEl.textContent = 'Error: Please host this page on a web server (e.g., python -m http.server) instead of file://';
+      if (window.location.protocol === 'file:' || !window.location.origin || window.location.origin === 'null') {
+        statusEl.textContent = 'Error: Host on an HTTPS server (e.g., python -m http.server or Vercel/Netlify) instead of file:// or sandboxed platforms.';
         startBtn.textContent = 'Retry';
         startBtn.classList.remove('hidden');
         isPlaying = false;
@@ -136,7 +179,7 @@
 
     function onPlayerError(event) {
       console.error('Player error:', event.data, 'Video ID:', videoList[currentVideoIndex]?.id.videoId || 'undefined');
-      statusEl.textContent = 'Video failed to load. Trying next...';
+      statusEl.textContent = 'Video failed to play. Switching to next...';
       currentVideoIndex++;
       loadNextVideo();
     }
@@ -161,7 +204,9 @@
           .filter(item => item.id?.videoId && item.topicDetails?.topicIds?.includes('/m/0ch8v')) // Horror topic
           .map(item => item.id.videoId)
           .filter(id => id && typeof id === 'string' && id.length === 11);
-        videoList = await filterPlayableVideos(videoIds);
+        const validVideos = await filterPlayableVideos(videoIds);
+        videoList = validVideos;
+        videoQueue = [...validVideos];
         console.log('Fetched videos:', videoList.map(v => v.id.videoId));
         if (videoList.length === 0) {
           statusEl.textContent = 'No playable horror Shorts found. Try again later.';
@@ -170,6 +215,8 @@
           isPlaying = false;
         }
         currentVideoIndex = 0;
+        // Cache videos in localStorage
+        localStorage.setItem('videoCache', JSON.stringify(videoList));
       } catch (error) {
         console.error('Fetch error:', error);
         statusEl.textContent = 'Error fetching videos. Retrying...';
@@ -178,11 +225,11 @@
       }
     }
 
-    // Filter playable videos
+    // Filter playable videos with advanced validation
     async function filterPlayableVideos(videoIds) {
       if (!videoIds.length) return [];
       const apiKey = apiKeys[currentApiKeyIndex];
-      const url = `https://www.googleapis.com/youtube/v3/videos?part=status&id=${videoIds.join(',')}&key=${apiKey}`;
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id=${videoIds.join(',')}&key=${apiKey}`;
       try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -194,7 +241,13 @@
         }
         const data = await response.json();
         return data.items
-          .filter(item => item.id && item.status.embeddable && item.status.uploadStatus === 'processed')
+          .filter(item => 
+            item.id &&
+            item.status.embeddable && 
+            item.status.uploadStatus === 'processed' &&
+            !item.contentDetails?.regionRestriction?.blocked?.length &&
+            !item.contentDetails?.contentRating?.ytRating // Exclude age-restricted
+          )
           .map(item => ({ id: { videoId: item.id } }));
       } catch (error) {
         console.error('Video filter error:', error);
@@ -202,24 +255,47 @@
       }
     }
 
-    // Load and play next video
-    function loadNextVideo() {
+    // Load and play next video with retry mechanism
+    async function loadNextVideo(retryCount = 0) {
       if (!isPlaying) return;
-      if (!videoList.length || currentVideoIndex >= videoList.length) {
-        currentVideoIndex = 0;
-        fetchVideos().then(() => {
-          if (videoList.length > 0) playVideo();
-        });
+      if (!playerReady) {
+        if (retryCount < MAX_RETRIES) {
+          setTimeout(() => loadNextVideo(retryCount + 1), RETRY_DELAY_BASE * Math.pow(2, retryCount));
+          return;
+        }
+        statusEl.textContent = 'Player not ready. Please refresh the page.';
+        startBtn.textContent = 'Retry';
+        startBtn.classList.remove('hidden');
+        isPlaying = false;
         return;
+      }
+      // Check video queue and refetch if low
+      if (videoQueue.length < 5) {
+        fetchVideos();
+      }
+      if (!videoList.length || currentVideoIndex >= videoList.length) {
+        // Try cached videos
+        const cachedVideos = JSON.parse(localStorage.getItem('videoCache') || '[]');
+        if (cachedVideos.length) {
+          videoList = cachedVideos;
+          videoQueue = [...cachedVideos];
+          currentVideoIndex = 0;
+        } else {
+          statusEl.textContent = 'No videos available. Fetching more...';
+          await fetchVideos();
+          if (!videoList.length) {
+            statusEl.textContent = 'No playable videos found. Try again later.';
+            startBtn.textContent = 'Retry';
+            startBtn.classList.remove('hidden');
+            isPlaying = false;
+            return;
+          }
+        }
       }
       playVideo();
     }
 
     function playVideo() {
-      if (!playerReady) {
-        setTimeout(playVideo, 500);
-        return;
-      }
       const video = videoList[currentVideoIndex];
       const videoId = video?.id?.videoId;
       if (!videoId || typeof videoId !== 'string' || videoId.length !== 11) {
@@ -279,17 +355,19 @@
     // Start game
     async function startGame() {
       if (!isPlaying) {
-        if (window.location.protocol === 'file:') {
-          statusEl.textContent = 'Error: Please host this page on a web server (e.g., python -m http.server) instead of file://';
+        if (window.location.protocol === 'file:' || !window.location.origin || window.location.origin === 'null') {
+          statusEl.textContent = 'Error: Host on an HTTPS server (e.g., python -m http.server or Vercel/Netlify) instead of file:// or sandboxed platforms.';
           startBtn.textContent = 'Retry';
           startBtn.classList.remove('hidden');
           return;
         }
+        if (!(await checkNetwork())) return;
         screamDetected = false;
         isPlaying = true;
         score = 0;
         currentVideoIndex = 0;
         videoList = [];
+        videoQueue = [];
         scoreEl.textContent = score;
         statusEl.textContent = 'Loading horror Shorts...';
         statusEl.classList.remove('glitch');
